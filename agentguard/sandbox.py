@@ -1,11 +1,12 @@
-"""Sandbox: enforce policy before touching fs / subprocess / network."""
+"""Sandbox: enforce policy before touching fs / subprocess / network (skills §7-§10)."""
 from __future__ import annotations
+import shlex
 import subprocess
 import urllib.parse
 from pathlib import Path
 
-from .policy import PolicyEngine
-from .audit import log_event
+from .policy import PolicyEngine, redact
+from .audit import log_event, redact_resource
 
 
 class GuardedSandbox:
@@ -22,29 +23,33 @@ class GuardedSandbox:
 
     def read_file(self, path: str) -> str:
         d = self.pe.check_read(path)
-        self._log("READ", path, d, "read")
+        self._log("READ", redact_resource(path), d, "read")
         if not d.allowed:
-            raise PermissionError(f"AGENTGUARD BLOCKED read {path}: {d.reason} [risk={d.risk}]")
+            raise PermissionError(f"AGENTGUARD BLOCKED read {redact(path)}: {d.reason} [risk={d.risk}]")
         return Path(path).read_text(encoding="utf-8")
 
     def write_file(self, path: str, content: str) -> None:
         d = self.pe.check_write(path)
-        self._log("WRITE", path, d, "write")
+        self._log("WRITE", redact_resource(path), d, "write")
         if not d.allowed:
-            raise PermissionError(f"AGENTGUARD BLOCKED write {path}: {d.reason} [risk={d.risk}]")
+            raise PermissionError(f"AGENTGUARD BLOCKED write {redact(path)}: {d.reason} [risk={d.risk}]")
         p = Path(path)
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(content, encoding="utf-8")
 
     def run_command(self, cmd: str | list, timeout: int = 30) -> subprocess.CompletedProcess:
-        cmd_str = cmd if isinstance(cmd, str) else " ".join(cmd)
-        d = self.pe.check_command(cmd_str)
+        cmd_str = cmd if isinstance(cmd, str) else " ".join(str(x) for x in cmd)
+        d = self.pe.check_command(cmd)
         self._log("EXEC", cmd_str, d, "exec")
         if not d.allowed:
             raise PermissionError(f"AGENTGUARD BLOCKED exec '{cmd_str}': {d.reason}")
         if d.needs_approval:
             raise PermissionError(f"AGENTGUARD APPROVAL required for '{cmd_str}': {d.reason}")
-        return subprocess.run(cmd, shell=isinstance(cmd, str), capture_output=True, text=True, timeout=timeout)
+        # Prefer structured execution (skills §8): lists run without shell;
+        # strings only after metachar batalla check in policy engine.
+        if isinstance(cmd, list):
+            return subprocess.run(cmd, shell=False, capture_output=True, text=True, timeout=timeout)
+        return subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)
 
     def check_url(self, url: str):
         domain = urllib.parse.urlparse(url).netloc.split(":")[0] or url
