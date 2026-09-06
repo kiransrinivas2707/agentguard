@@ -33,8 +33,14 @@ def test_single_engine_routing():
 def test_mcp_allowed_tool(tmp_path):
     g, _ = gw(tmp_path)
     Path("workspace").mkdir(exist_ok=True)
-    Path("workspace/app.py").write_text("print(1)\n")
-    assert "print(1)" in g.handle("filesystem.read", {"path": "workspace/app.py"})
+    target = Path("workspace/app.py")
+    backup = target.read_text() if target.exists() else None
+    target.write_text("print(1)\n")
+    try:
+        assert "print(1)" in g.handle("filesystem.read", {"path": "workspace/app.py"})
+    finally:
+        if backup is not None:
+            target.write_text(backup)
 
 
 def test_mcp_denied_tool(tmp_path):
