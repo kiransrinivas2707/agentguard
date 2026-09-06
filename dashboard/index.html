@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>AgentGuard — Test Dashboard</title>
+<style>
+  body{font-family:Segoe UI,Arial,sans-serif;background:#0f172a;color:#e2e8f0;margin:0}
+  header{background:#020617;padding:16px 24px;border-bottom:1px solid #1e293b;display:flex;justify-content:space-between;align-items:center}
+  h1{font-size:18px;margin:0} .sub{color:#94a3b8;font-size:12px}
+  main{padding:20px 24px;max-width:1100px;margin:auto}
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:16px 0}
+  .card{background:#1e293b;border-radius:10px;padding:14px;text-align:center}
+  .card b{font-size:26px;display:block} .ok{color:#4ade80}.bad{color:#f87171}.warn{color:#facc15}
+  button{background:#38bdf8;border:0;border-radius:8px;padding:10px 16px;font-weight:700;cursor:pointer;margin-right:8px}
+  button.ghost{background:#1e293b;color:#e2e8f0}
+  table{width:100%;border-collapse:collapse;background:#020617;border-radius:10px;overflow:hidden;font-size:13px}
+  th,td{padding:8px 10px;border-bottom:1px solid #1e293b;text-align:left}
+  th{color:#94a3b8} .ALLOWED{color:#4ade80}.BLOCKED{color:#f87171}.APPROVAL{color:#facc15}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px} @media(max-width:800px){.grid{grid-template-columns:1fr}}
+  pre{background:#020617;padding:12px;border-radius:10px;overflow:auto;font-size:12px;max-height:300px}
+  canvas{background:#020617;border-radius:10px;width:100%;height:220px}
+  .flow{background:#020617;border-radius:10px;padding:12px;font-family:Consolas,monospace;font-size:12px;white-space:pre-wrap}
+</style>
+</head>
+<body>
+<header>
+  <div><h1>🛡️ AgentGuard — Test Dashboard</h1><div class="sub">v0.1 · policy + audit visualization · data: logs/audit.jsonl</div></div>
+  <div><button onclick="runDemo()">▶ Run attack simulation</button><button class="ghost" onclick="load()">↻ Refresh</button></div>
+</header>
+<main>
+  <div class="cards">
+    <div class="card"><span>Total</span><b id="c-total">–</b></div>
+    <div class="card"><span>Allowed</span><b id="c-allow" class="ok">–</b></div>
+    <div class="card"><span>Blocked</span><b id="c-block" class="bad">–</b></div>
+    <div class="card"><span>Approval</span><b id="c-appr" class="warn">–</b></div>
+    <div class="card"><span>Risk</span><b id="c-risk">–</b><span id="c-level" class="sub"></span></div>
+  </div>
+  <div class="grid">
+    <div><h3>Events by action</h3><canvas id="chart" width="500" height="220"></canvas></div>
+    <div><h3>How data flows</h3><div class="flow">Agent action
+  → GuardedSandbox (sandbox.py)
+  → PolicyEngine.check_* (policy.py + agentguard.yaml)
+  → audit log (logs/audit.jsonl)
+  → Flask /api/summary + /api/events (dashboard/server.py)
+  → this UI (fetch → cards + chart + table)</div></div>
+  </div>
+  <h3>Recent events <input id="q" placeholder="filter…" oninput="render()" style="margin-left:8px;padding:6px;border-radius:6px;border:0"/></h3>
+  <table><thead><tr><th>Time</th><th>Action</th><th>Resource</th><th>Result</th><th>Reason</th></tr></thead><tbody id="rows"></tbody></table>
+  <h3>Active policy (agentguard.yaml)</h3>
+  <pre id="policy">loading…</pre>
+</main>
+<script>
+let EVENTS=[];
+async function load(){
+  const [s,e,p]=await Promise.all([fetch('/api/summary').then(r=>r.json()),fetch('/api/events?limit=200').then(r=>r.json()),fetch('/api/policy').then(r=>r.json())]);
+  document.getElementById('c-total').textContent=s.total;
+  document.getElementById('c-allow').textContent=s.allowed;
+  document.getElementById('c-block').textContent=s.blocked;
+  document.getElementById('c-appr').textContent=s.approval;
+  document.getElementById('c-risk').textContent=s.risk_score+'/100';
+  document.getElementById('c-level').textContent=s.risk_level;
+  EVENTS=e; render(); drawChart(s.by_action||{});
+  document.getElementById('policy').textContent=JSON.stringify(p,null,2).slice(0,4000);
+}
+function render(){
+  const q=(document.getElementById('q').value||'').toLowerCase();
+  document.getElementById('rows').innerHTML=EVENTS.filter(e=>(e.action+e.resource+e.result+e.reason).toLowerCase().includes(q)).slice(-60).reverse().map(e=>`<tr><td>${e.time}</td><td>${e.action}</td><td>${e.resource}</td><td class="${e.result}">${e.result}</td><td>${e.reason||''}</td></tr>`).join('');
+}
+function drawChart(by){
+  const c=document.getElementById('chart'),x=c.getContext('2d');x.clearRect(0,0,c.width,c.height);
+  const keys=Object.keys(by);if(!keys.length){x.fillStyle='#94a3b8';x.fillText('no data yet — run simulation',20,110);return;}
+  const max=Math.max(...Object.values(by));const bw=c.width/keys.length;
+  keys.forEach((k,i)=>{const h=(by[k]/max)*170;x.fillStyle='#38bdf8';x.fillRect(i*bw+20,200-h,bw-40,h);x.fillStyle='#e2e8f0';x.fillText(`${k} (${by[k]})`,i*bw+20,214);});
+}
+async function runDemo(){await fetch('/api/run-demo',{method:'POST'});await load();}
+load();
+</script>
+</body>
+</html>
