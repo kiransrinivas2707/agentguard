@@ -9,13 +9,15 @@ import yaml
 from agentguard.policy import load_policy, PolicyEngine
 from agentguard.audit import read_events
 
-app = Flask(__name__, static_folder=".")
-POLICY_PATH = Path("agentguard.yaml")
-LOG_PATH = Path("logs/audit.jsonl")
+app = Flask(__name__)
+BASE = Path(__file__).resolve().parents[1]
+DASHBOARD_DIR = BASE / "dashboard"
+POLICY_PATH = BASE / "agentguard.yaml"
+LOG_PATH = BASE / "logs" / "audit.jsonl"
 
 @app.get("/")
 def index():
-    return send_from_directory(Path("dashboard"), "index.html")
+    return send_from_directory(str(DASHBOARD_DIR), "index.html")
 
 @app.get("/api/policy")
 def api_policy():
