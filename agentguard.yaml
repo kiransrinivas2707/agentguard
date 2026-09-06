@@ -1,0 +1,49 @@
+version: 1
+
+filesystem:
+  read:
+    - ./src/**
+    - ./tests/**
+    - ./workspace/**
+    - ./agentguard.yaml
+  write:
+    - ./workspace/**
+    - ./logs/**
+  deny:
+    - .env
+    - ~/.ssh/**
+    - ~/.aws/**
+
+commands:
+  allow:
+    - python
+    - pytest
+    - npm
+    - node
+    - git
+    - dir
+    - echo
+  deny:
+    - sudo
+    - shutdown
+    - rm -rf /
+    - curl
+
+network:
+  default: deny
+  allow:
+    - api.github.com
+    - registry.npmjs.org
+    - pypi.org
+    - files.pythonhosted.org
+
+approval:
+  - git push
+  - npm publish
+
+secrets:
+  deny:
+    - .env
+    - '**/.ssh/**'
+    - '**/.aws/**'
+    - '**/*id_rsa*'
