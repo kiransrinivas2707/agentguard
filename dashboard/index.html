@@ -46,7 +46,7 @@
   → this UI (fetch → cards + chart + table)</div></div>
   </div>
   <h3>Recent events <input id="q" placeholder="filter…" oninput="render()" style="margin-left:8px;padding:6px;border-radius:6px;border:0"/></h3>
-  <table><thead><tr><th>Time</th><th>Action</th><th>Resource</th><th>Result</th><th>Reason</th></tr></thead><tbody id="rows"></tbody></table>
+  <table><thead><tr><th>Time</th><th>Agent</th><th>Protocol</th><th>Tool</th><th>Action</th><th>Resource</th><th>Result</th><th>Reason</th></tr></thead><tbody id="rows"></tbody></table>
   <h3>Active policy (agentguard.yaml)</h3>
   <pre id="policy">loading…</pre>
 </main>
@@ -65,7 +65,7 @@ async function load(){
 }
 function render(){
   const q=(document.getElementById('q').value||'').toLowerCase();
-  document.getElementById('rows').innerHTML=EVENTS.filter(e=>(e.action+e.resource+e.result+e.reason).toLowerCase().includes(q)).slice(-60).reverse().map(e=>`<tr><td>${e.time}</td><td>${e.action}</td><td>${e.resource}</td><td class="${e.result}">${e.result}</td><td>${e.reason||''}</td></tr>`).join('');
+  document.getElementById('rows').innerHTML=EVENTS.filter(e=>(e.action+e.resource+e.result+e.reason+(e.tool||'')+(e.agent_id||'')).toLowerCase().includes(q)).slice(-60).reverse().map(e=>`<tr><td>${e.time}</td><td>${e.agent_id||''}</td><td>${e.protocol||''}</td><td>${e.tool||''}</td><td>${e.action}</td><td>${e.resource}</td><td class="${e.result}">${e.result}</td><td>${e.reason||''}</td></tr>`).join('');
 }
 function drawChart(by){
   const c=document.getElementById('chart'),x=c.getContext('2d');x.clearRect(0,0,c.width,c.height);

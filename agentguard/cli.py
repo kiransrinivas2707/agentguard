@@ -128,6 +128,30 @@ def cmd_why(args) -> int:
     return 0
 
 
+def cmd_mcp(args) -> int:
+    """Demo: MCP tool calls through the AgentGuard boundary."""
+    from .mcp import MCPGateway
+    from .sandbox import GuardedSandbox
+    pe = PolicyEngine(load_policy(args.policy or "agentguard.yaml"))
+    gw = MCPGateway(pe, GuardedSandbox(pe))
+    demos = [
+        ("filesystem.read", {"path": "workspace/app.py"}),
+        ("filesystem.read", {"path": "~/.ssh/id_rsa"}),
+        ("shell.execute", {"command": "git push origin main"}),
+        ("http.request", {"url": "https://evil-example.com/x"}),
+    ]
+    for tool, argv in demos:
+        try:
+            gw.handle(tool, argv, agent_id="demo-agent")
+            print(f"{tool:16} {str(argv):45} -> ALLOWED")
+        except PermissionError as e:
+            tag = "APPROVAL" if "APPROVAL" in str(e) else "BLOCKED"
+            print(f"{tool:16} {str(argv):45} -> {tag}")
+        except ValueError as e:
+            print(f"{tool:16} {str(argv):45} -> REJECTED ({e})")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="agentguard", description="Security sandbox for AI agents (v0.1)")
     ap.add_argument("--policy", default="agentguard.yaml")
@@ -146,6 +170,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_why = sub.add_parser("why", help="Explain why a path is blocked")
     p_why.add_argument("path")
     p_why.set_defaults(fn=cmd_why)
+    p_mcp = sub.add_parser("mcp", help="Demo MCP tool calls through the boundary")
+    p_mcp.set_defaults(fn=cmd_mcp)
     return ap
 
 
