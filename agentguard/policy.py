@@ -46,7 +46,7 @@ RISK_TABLE = {
 
 APPROVAL_HINTS = ["git push", "npm publish", "pip publish", "docker push", "kubectl", "terraform apply", "rm ", "delete"]
 
-ALLOWED_TOP_FIELDS = {"version", "filesystem", "commands", "network", "approval", "secrets"}
+ALLOWED_TOP_FIELDS = {"version", "filesystem", "commands", "network", "approval", "secrets", "resources"}
 SHELL_METACHARS = {";", "&", "|", "$", "`", "\n", "<", ">", "$(", "${"}
 
 # Hosts that must never be reachable unless explicitly allowlisted (skills §9)
@@ -168,6 +168,17 @@ def load_policy(path: str | Path) -> Dict:
         raise ValueError("Invalid policy: network.default must be 'deny' or 'allow'")
     if not isinstance(data.get("approval", []), list):
         raise ValueError("Invalid policy: approval must be list[str]")
+    if "resources" in data:
+        from .resources import ResourceLimits
+        r = data["resources"]
+        if not isinstance(r, dict):
+            raise ValueError("Invalid policy: resources must be a mapping")
+        ResourceLimits(
+            timeout_seconds=int(r.get("timeout_seconds", 60)),
+            max_output_bytes=int(r.get("max_output_bytes", 10 * 1024 * 1024)),
+            max_memory_mb=r.get("max_memory_mb", None),
+            max_processes=int(r.get("max_processes", 64)),
+        ).validate()
     return data
 
 

@@ -47,3 +47,8 @@ secrets:
     - '**/.ssh/**'
     - '**/.aws/**'
     - '**/*id_rsa*'
+
+resources:
+  timeout_seconds: 60
+  max_output_bytes: 10485760
+  max_processes: 64

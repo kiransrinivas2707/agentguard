@@ -7,6 +7,7 @@ from pathlib import Path
 
 from .policy import PolicyEngine, redact
 from .audit import log_event, redact_resource
+from .resources import ResourceLimits, ResourceViolation, limits_from_policy, run_guarded
 
 
 class GuardedSandbox:
@@ -37,7 +38,8 @@ class GuardedSandbox:
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(content, encoding="utf-8")
 
-    def run_command(self, cmd: str | list, timeout: int = 30) -> subprocess.CompletedProcess:
+    def run_command(self, cmd: str | list, timeout: int = 30,
+                    limits: ResourceLimits | None = None) -> subprocess.CompletedProcess:
         cmd_str = cmd if isinstance(cmd, str) else " ".join(str(x) for x in cmd)
         d = self.pe.check_command(cmd)
         self._log("EXEC", cmd_str, d, "exec")
@@ -45,11 +47,21 @@ class GuardedSandbox:
             raise PermissionError(f"AGENTGUARD BLOCKED exec '{cmd_str}': {d.reason}")
         if d.needs_approval:
             raise PermissionError(f"AGENTGUARD APPROVAL required for '{cmd_str}': {d.reason}")
+        # Resource limits (P7): policy section wins, explicit arg overrides timeout.
+        lim = limits or limits_from_policy(self.pe.policy)
+        if timeout != 30:
+            lim.timeout_seconds = timeout
+        def _res_log(action: str, resource: str, reason: str) -> None:
+            log_event(action, redact_resource(resource), "RESOURCE_LIMIT", reason,
+                      kind="exec", risk="HIGH", log_path=self.log_path)
         # Prefer structured execution (skills §8): lists run without shell;
-        # strings only after metachar batalla check in policy engine.
-        if isinstance(cmd, list):
-            return subprocess.run(cmd, shell=False, capture_output=True, text=True, timeout=timeout)
-        return subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)
+        # strings only after metachar check in policy engine.
+        try:
+            if isinstance(cmd, list):
+                return run_guarded(cmd, lim, log_fn=_res_log, shell=False)
+            return run_guarded(cmd, lim, log_fn=_res_log, shell=True)
+        except ResourceViolation as v:
+            raise PermissionError(str(v)) from v
 
     def check_url(self, url: str):
         domain = urllib.parse.urlparse(url).netloc.split(":")[0] or url

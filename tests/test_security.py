@@ -35,7 +35,8 @@ def test_symlink_escape(tmp_path):
             link.unlink()
         link.symlink_to(target)
     except Exception:
-        pytest.skip("symlinks unavailable")
+        pytest.skip("Requires symlink privilege (Windows SeCreateSymbolicLinkPrivilege) "
+                    "or POSIX FS — covered on Linux CI; see docs/security-guarantees.md")
     try:
         pe = make_engine()
         # canonical resolution should treat link target outside workspace as not-allowlisted write
