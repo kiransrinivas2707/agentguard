@@ -128,6 +128,46 @@ def cmd_why(args) -> int:
     return 0
 
 
+def cmd_pending(args) -> int:
+    from .approval import ApprovalStore
+    for r in ApprovalStore().pending():
+        print(f"{r['request_id']} {r['action']:7} {r['resource']:30} agent={r['agent_id']} tool={r['tool']}")
+    return 0
+
+
+def _gateway(args):
+    from .mcp import MCPGateway
+    from .sandbox import GuardedSandbox
+    pe = PolicyEngine(load_policy(args.policy or "agentguard.yaml"))
+    return MCPGateway(pe, GuardedSandbox(pe))
+
+
+def cmd_approve(args) -> int:
+    gw = _gateway(args)
+    try:
+        out = gw.complete(args.request_id, True)
+        print(f"APPROVED + executed [{args.request_id}]")
+        if out:
+            print(str(out)[:2000])
+        return 0
+    except (PermissionError, KeyError, ValueError) as e:
+        print(f"Cannot approve: {e}", file=sys.stderr)
+        return 3
+
+
+def cmd_deny(args) -> int:
+    gw = _gateway(args)
+    try:
+        gw.complete(args.request_id, False)
+        return 0
+    except PermissionError as e:
+        print(f"DENIED [{args.request_id}]: {e}")
+        return 0
+    except (KeyError, ValueError) as e:
+        print(f"Cannot deny: {e}", file=sys.stderr)
+        return 3
+
+
 def cmd_mcp(args) -> int:
     """Demo: MCP tool calls through the AgentGuard boundary."""
     from .mcp import MCPGateway
@@ -172,6 +212,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_why.set_defaults(fn=cmd_why)
     p_mcp = sub.add_parser("mcp", help="Demo MCP tool calls through the boundary")
     p_mcp.set_defaults(fn=cmd_mcp)
+    p_pend = sub.add_parser("pending", help="List queued approval requests")
+    p_pend.set_defaults(fn=cmd_pending)
+    p_appr = sub.add_parser("approve", help="Approve a queued request and execute it")
+    p_appr.add_argument("request_id")
+    p_appr.set_defaults(fn=cmd_approve)
+    p_deny = sub.add_parser("deny", help="Deny a queued request (tool never runs)")
+    p_deny.add_argument("request_id")
+    p_deny.set_defaults(fn=cmd_deny)
     return ap
 
 

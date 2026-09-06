@@ -46,6 +46,20 @@ http.request({'url': 'https://evil-example.com/x'}) -> BLOCKED
 
 Denied tools never execute (killer test: `test_mcp_killer_tool_never_executes`).
 
+> Tool metadata is untrusted. AgentGuard authorizes operations, not tool descriptions.
+
+## Real agent + approvals (v0.4)
+
+```powershell
+python examples/coding-agent/agent.py   # real agent loop via the boundary
+python -m agentguard.cli pending        # queued APPROVAL with request_id
+python -m agentguard.cli approve ag_... # human approves -> executes + audits
+python -m agentguard.cli deny ag_...    # human denies -> tool never runs
+```
+
+Every step shares one `request_id` (`ag_...`) across request -> decision ->
+approval -> execution -> audit. Deny and double-decide fail closed.
+
 ## Quickstart (Windows, Python 3.13)
 
 ```powershell
