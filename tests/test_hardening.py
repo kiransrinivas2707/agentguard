@@ -91,8 +91,14 @@ def test_p4_network_matrix():
 def test_secret_contents_never_logged(tmp_path):
     token = "AKIA-FAKE-TOKEN-12345"
     sb = GuardedSandbox(pe(), log_path=tmp_path / "a.jsonl")
-    sb.write_file("workspace/token.txt", token)
-    sb.read_file("workspace/token.txt")
+    try:
+        sb.write_file("workspace/token.txt", token)
+        sb.read_file("workspace/token.txt")
+    finally:
+        try:
+            Path("workspace/token.txt").unlink()
+        except Exception:
+            pass
     try:
         sb.read_file(".env")
     except PermissionError:
