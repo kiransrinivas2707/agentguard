@@ -31,6 +31,21 @@ symlink, command/shell injection, network bypass (localhost, private IPs,
 `169.254.169.254`), secret redaction, sandbox-escape enforcement
 (`tests/test_hardening.py`). Evidence: `dashboard/test_report.html`.
 
+## MCP boundary (v0.3)
+
+One action model, one engine — MCP is a thin adapter (`agentguard/mcp.py`):
+
+```
+$ python -m agentguard.cli mcp
+
+filesystem.read({'path': 'workspace/app.py'})   -> ALLOWED
+filesystem.read({'path': '~/.ssh/id_rsa'})      -> BLOCKED
+shell.execute({'command': 'git push origin main'}) -> APPROVAL
+http.request({'url': 'https://evil-example.com/x'}) -> BLOCKED
+```
+
+Denied tools never execute (killer test: `test_mcp_killer_tool_never_executes`).
+
 ## Quickstart (Windows, Python 3.13)
 
 ```powershell

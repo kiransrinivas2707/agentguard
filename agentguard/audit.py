@@ -21,7 +21,8 @@ def redact_resource(resource: str) -> str:
 
 
 def log_event(action: str, resource: str, result: str, reason: str = "", kind: str = "read",
-              risk: str = "LOW", log_path: str | Path = DEFAULT_LOG, agent_id: str = "local-agent") -> Dict:
+              risk: str = "LOW", log_path: str | Path = DEFAULT_LOG, agent_id: str = "local-agent",
+              protocol: str = "", tool: str = "") -> Dict:
     log_path = Path(log_path)
     log_path.parent.mkdir(parents=True, exist_ok=True)
     safe_resource = redact_resource(resource)
@@ -35,6 +36,8 @@ def log_event(action: str, resource: str, result: str, reason: str = "", kind: s
         "time": time.strftime("%H:%M:%S"),
         "timestamp": time.time(),
         "agent_id": agent_id,
+        "protocol": protocol,
+        "tool": tool,
         "action": action.upper(),
         "resource": safe_resource,
         "result": result,
