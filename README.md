@@ -16,6 +16,21 @@ AI Agent -> AgentGuard (policy + audit) -> Sandbox / OS
 4. Secrets protection (`.env`, `~/.ssh`, `~/.aws`)
 5. Audit log + risk score (`logs/audit.jsonl`)
 
+## Security Demo
+
+AgentGuard executed 10 attack scenarios:
+
+| Allowed | 4 |
+| Blocked | 5 |
+| Approval | 1 |
+
+Risk: 65/100 HIGH (see `docs/risk.md` for math).
+
+Hardening suite: `22 passed, 1 skipped` — traversal, prefix-confusion,
+symlink, command/shell injection, network bypass (localhost, private IPs,
+`169.254.169.254`), secret redaction, sandbox-escape enforcement
+(`tests/test_hardening.py`). Evidence: `dashboard/test_report.html`.
+
 ## Quickstart (Windows, Python 3.13)
 
 ```powershell

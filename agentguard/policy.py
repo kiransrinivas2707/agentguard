@@ -30,15 +30,19 @@ DEFAULT_SECRET_PATTERNS = [
 ]
 
 RISK_TABLE = {
-    "read": 5,
-    "write": 15,
-    "exec_low": 5,      # python, pytest, node, git status
-    "exec_medium": 15,  # npm install, pip install
-    "exec_high": 30,    # git push, docker, deploy
-    "network": 10,
-    "secret": 50,
-    "approval": 20,
+    "read": 5,          # allowed READ event
+    "write": 15,        # allowed WRITE event
+    "exec_low": 5,      # allowed low-risk exec (python, pytest, node, git status)
+    "exec_medium": 15,  # allowed exec with side effects (npm/pip install)
+    "network": 10,      # allowed NETWORK event
+    "blocked": 5,       # any BLOCKED attempt adds this base weight
+    "secret_bonus": 15,  # extra weight when BLOCKED attempt was CRITICAL/secret
+    "approval": 20,     # extra weight when event needs human approval
 }
+# Documented risk math (P5): score = Σ per-event weights, capped at 100.
+#   ALLOWED read +5 | write +15 | exec low +5 / install +15 | network +10
+#   BLOCKED any +5, plus +15 more if CRITICAL secret attempt (=20)
+#   APPROVAL flag +20. Bands: 0-29 LOW, 30-59 MEDIUM, 60-84 HIGH, 85-100 CRITICAL.
 
 APPROVAL_HINTS = ["git push", "npm publish", "pip publish", "docker push", "kubectl", "terraform apply", "rm ", "delete"]
 
@@ -190,12 +194,21 @@ class PolicyEngine:
             return Decision(True, "Write allowed by filesystem policy", risk="LOW")
         return Decision(False, f"Write not in allowlist: {redact(path)}", risk="MEDIUM")
 
-    # ---- commands (skills §8: structured args, no sh -c on untrusted) ----
+    # ---- commands (skills §8: structured program + args, exact program match) ----
+    @staticmethod
+    def _prog_norm(name: str) -> str:
+        b = os.path.basename(str(name).strip().split()[0] if str(name).strip() else "")
+        b = b.lower()
+        for ext in (".exe", ".bat", ".cmd", ".com", ".ps1"):
+            if b.endswith(ext):
+                b = b[: -len(ext)]
+        return b
+
     @staticmethod
     def _split(cmd: str | list) -> Tuple[str, List[str], str]:
         if isinstance(cmd, list):
             parts = [str(x) for x in cmd]
-            base = os.path.basename(parts[0]) if parts else ""
+            base = PolicyEngine._prog_norm(parts[0]) if parts else ""
             return base, parts[1:], " ".join(parts)
         s = str(cmd).strip()
         try:
@@ -203,7 +216,7 @@ class PolicyEngine:
         except Exception:
             parts = s.split()
         raw_base = parts[0] if parts else ""
-        base = os.path.basename(raw_base)
+        base = PolicyEngine._prog_norm(raw_base)
         return base, parts[1:], s
 
     def check_command(self, command: str | list) -> Decision:
@@ -213,22 +226,26 @@ class PolicyEngine:
         allow = cmds.get("allow", [])
         # fail closed on shell metachars in string form (skills §8/§18)
         if isinstance(command, str):
-            lowered = f" {cmd_str} "
             for m in (";", "&&", "||", "|", "`", "$(", "${", "\n", "\r"):
                 if m in cmd_str:
                     return Decision(False, f"Command denied: shell metacharacter {m!r} (use structured args)", risk="HIGH")
-        # deny wins; match base program name so /usr/bin/curl == curl
+        # deny wins; exact program match so mycurl/curl-malicious != curl,
+        # but curl.exe and /usr/bin/curl == curl (P1).
         for d in deny:
-            d_base = os.path.basename(str(d).split()[0])
-            if cmd_str == d or base == d_base or cmd_str.startswith(str(d)):
-                return Decision(False, f"Command denied: {d}", risk="HIGH")
-        # approval list
+            d_parts = str(d).strip().split()
+            d_prog = self._prog_norm(d_parts[0] if d_parts else "")
+            d_args = d_parts[1:]
+            if base == d_prog:
+                if not d_args or args[: len(d_args)] == d_args or cmd_str.startswith(str(d)):
+                    return Decision(False, f"Command denied: {d}", risk="HIGH")
+        # approval list (substring on full command is intentional: git push vs git status)
         for a in list(self.policy.get("approval", [])) + APPROVAL_HINTS:
             if a and a in cmd_str:
                 return Decision(True, f"Approval required: {a}", risk="HIGH", needs_approval=True)
+        # allow: EXACT program match only (P1). git-upload-pack != git,
+        # mycurl != curl. Subcommand control lives in approval/deny, not prefix.
         for a in allow:
-            a_base = os.path.basename(str(a).split()[0])
-            if base == a_base or cmd_str == a or cmd_str.startswith(str(a)):
+            if base == self._prog_norm(a):
                 risk = "LOW" if base in ("python", "pytest", "node", "git") and "push" not in cmd_str else "MEDIUM"
                 return Decision(True, f"Command allowed: {base}", risk=risk)
         return Decision(False, f"Command not in allowlist: {base}", risk="MEDIUM")
@@ -276,9 +293,11 @@ class PolicyEngine:
             kind = e.get("kind", "read")
             result = e.get("result", "ALLOWED")
             if result == "BLOCKED":
-                score += 5
+                score += RISK_TABLE["blocked"]
+                if e.get("risk") == "CRITICAL":
+                    score += RISK_TABLE["secret_bonus"]
             elif kind == "read":
-                score += RISK_TABLE["read"] if "ssh" not in str(e) else RISK_TABLE["secret"]
+                score += RISK_TABLE["read"]
             elif kind == "write":
                 score += RISK_TABLE["write"]
             elif kind == "exec":
