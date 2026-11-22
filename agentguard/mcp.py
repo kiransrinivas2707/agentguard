@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict
 
 from .actions import AgentAction, execute, normalize
+from .approval import ApprovalNeeded, ApprovalStore
 from .audit import log_event
 from .policy import PolicyEngine, redact
 from .sandbox import GuardedSandbox
@@ -49,27 +50,66 @@ class MCPGateway:
     """Intercepts MCP tool invocations. registry maps tool-name -> callable."""
 
     def __init__(self, engine: PolicyEngine, sandbox: GuardedSandbox,
-                 registry: Dict[str, Callable[[AgentAction], Any]] | None = None):
+                 registry: dict[str, Callable[[AgentAction], Any]] | None = None,
+                 approvals: ApprovalStore | None = None):
         self.engine = engine
         self.sandbox = sandbox
         self.registry = registry or default_registry(sandbox)
+        self.approvals = approvals or ApprovalStore()
 
-    def handle(self, tool: str, arguments: Dict[str, Any], agent_id: str = "mcp-agent") -> Any:
+    def _log(self, a: AgentAction, d, result: str) -> None:
+        from .audit import redact_resource
+        log_event(a.action, redact_resource(a.resource), result, d.reason,
+                  kind=a.action.lower(), risk=d.risk, log_path=self.sandbox.log_path,
+                  agent_id=a.agent_id, protocol=a.protocol, tool=a.tool,
+                  request_id=a.request_id)
+
+    def handle(self, tool: str, arguments: dict[str, Any], agent_id: str = "mcp-agent") -> Any:
+        from .actions import decide
         act = to_action(tool, arguments, agent_id)
+        d = decide(self.engine, act)
+        result = "ALLOWED" if d.allowed else "BLOCKED"
+        if d.needs_approval:
+            result = "APPROVAL"
+        self._log(act, d, result)
+        if not d.allowed:
+            raise PermissionError(f"AGENTGUARD BLOCKED {act.describe()}: {d.reason}")
+        if d.needs_approval:
+            self.approvals.request(act, d.reason)
+            raise ApprovalNeeded(act.request_id, act.describe())
+        return self._run(tool, act)
 
-        def _log(a: AgentAction, d, result: str) -> None:
-            from .audit import redact_resource
-            log_event(a.action, redact_resource(a.resource), result, d.reason,
-                      kind=a.action.lower(), risk=d.risk, log_path=self.sandbox.log_path,
-                      agent_id=a.agent_id, protocol=a.protocol, tool=a.tool)
+    def _run(self, tool: str, act: AgentAction, preapproved: bool = False) -> Any:
+        impl = self.registry.get(tool)
+        if impl is None:
+            raise ValueError(f"No implementation for tool {tool!r} (fail-closed)")
+        if preapproved and tool in ("shell.execute", "shell.exec", "exec"):
+            return self._run_approved(act)
+        return impl(act)
 
-        def _run(a: AgentAction) -> Any:
-            impl = self.registry.get(tool)
-            if impl is None:
-                raise ValueError(f"No implementation for tool {tool!r} (fail-closed)")
-            return impl(a)
+    def _run_approved(self, act: AgentAction) -> Any:
+        """Post-approval exec: human cleared the approval gate; deny/resource
+        gates stay enforced inside run_command."""
+        cmd = [act.resource, *act.args] if act.args else act.resource
+        r = self.sandbox.run_command(cmd, preapproved=True)
+        return r.stdout
 
-        return execute(self.engine, act, _run, log_fn=_log)
+    def complete(self, request_id: str, approved: bool, by: str = "human") -> Any:
+        """Human decision on a queued request. DENY never runs the tool."""
+        from .actions import decide, normalize
+        rec = self.approvals.decide(request_id, approved, by)
+        act = normalize(rec["action"], rec["resource"], rec["args"],
+                        agent_id=rec["agent_id"], protocol=rec["protocol"], tool=rec["tool"])
+        act.request_id = request_id  # same trace across approval boundary
+        d = decide(self.engine, act)  # re-decide: policy may have tightened
+        if not approved:
+            self._log(act, d, "DENIED")
+            raise PermissionError(f"AGENTGUARD DENIED {act.describe()} [request_id={request_id}]")
+        if not d.allowed and not d.needs_approval:
+            self._log(act, d, "BLOCKED")
+            raise PermissionError(f"AGENTGUARD BLOCKED {act.describe()}: policy now denies it")
+        self._log(act, d, "APPROVED")
+        return self._run(rec["tool"], act, preapproved=True)
 
 
 def default_registry(sandbox: GuardedSandbox) -> Dict[str, Callable[[AgentAction], Any]]:

@@ -39,13 +39,16 @@ class GuardedSandbox:
         p.write_text(content, encoding="utf-8")
 
     def run_command(self, cmd: str | list, timeout: int = 30,
-                    limits: ResourceLimits | None = None) -> subprocess.CompletedProcess:
+                    limits: ResourceLimits | None = None,
+                    preapproved: bool = False) -> subprocess.CompletedProcess:
+        """preapproved=True clears ONLY the approval gate (human already decided);
+        allow/deny, injection and resource enforcement always stay on."""
         cmd_str = cmd if isinstance(cmd, str) else " ".join(str(x) for x in cmd)
         d = self.pe.check_command(cmd)
         self._log("EXEC", cmd_str, d, "exec")
         if not d.allowed:
             raise PermissionError(f"AGENTGUARD BLOCKED exec '{cmd_str}': {d.reason}")
-        if d.needs_approval:
+        if d.needs_approval and not preapproved:
             raise PermissionError(f"AGENTGUARD APPROVAL required for '{cmd_str}': {d.reason}")
         # Resource limits (P7): policy section wins, explicit arg overrides timeout.
         lim = limits or limits_from_policy(self.pe.policy)

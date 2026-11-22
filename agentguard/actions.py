@@ -1,4 +1,4 @@
-"""Agent boundary (v0.3): ONE action model, ONE engine, many adapters.
+"""Agent boundary (v0.3+): ONE action model, ONE engine, many adapters.
 
 Every adapter (CLI, MCP, future agent APIs) normalizes external requests into
 AgentAction and flows through PolicyEngine -> Runtime -> Audit. Adapters must
@@ -6,12 +6,17 @@ never implement their own security logic.
 """
 from __future__ import annotations
 import time
+import uuid
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from .policy import PolicyEngine
 
 ACTIONS = {"READ", "WRITE", "EXEC", "NETWORK"}
+
+
+def new_request_id() -> str:
+    return "ag_" + uuid.uuid4().hex[:12]
 
 
 @dataclass
@@ -22,10 +27,12 @@ class AgentAction:
     agent_id: str = "local-agent"
     protocol: str = "cli"            # cli | mcp | api
     tool: str = ""                   # e.g. filesystem.read (mcp only)
+    request_id: str = field(default_factory=new_request_id)
     timestamp: float = field(default_factory=time.time)
 
     def describe(self) -> str:
-        return f"{self.action} {self.resource} {self.args}".strip()
+        from .policy import redact
+        return f"{self.action} {redact(self.resource)} {self.args}".strip()
 
 
 def normalize(action: str, resource: str, args: list | None = None,
